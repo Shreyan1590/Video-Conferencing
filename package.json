@@ -1,4 +1,13 @@
 {
+  "name": "video-conferencing",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "cd backend && npm run dev",
+    "start": "cd backend && npm install && npm run build && npm run start",
+    "build": "cd backend && npm install && npm run build",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "postinstall": "cd backend && npm install"
+  },
   "dependencies": {
     "crypto-js": "^4.2.0"
   }
