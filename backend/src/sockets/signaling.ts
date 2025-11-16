@@ -2,7 +2,7 @@ import { Server, Socket } from 'socket.io';
 
 import { getCollections } from '../db/mongo';
 
-interface ServerToClientEvents {
+export interface ServerToClientEvents {
   'user-joined': (data: { userId: string; fullName: string }) => void;
   'user-left': (data: { userId: string }) => void;
   'signal': (data: { from: string; to: string; signal: unknown }) => void;
@@ -23,7 +23,7 @@ interface ServerToClientEvents {
   reaction: (data: { userId: string; fullName: string; emoji: string; timestamp: number }) => void;
 }
 
-interface ClientToServerEvents {
+export interface ClientToServerEvents {
   'join-room': (data: { roomId: string; userId: string; fullName: string }) => void;
   'leave-room': (data: { roomId: string; userId: string }) => void;
   'signal': (data: { roomId: string; to: string; from: string; signal: unknown }) => void;
@@ -42,7 +42,7 @@ interface ClientToServerEvents {
   reaction: (data: { roomId: string; userId: string; fullName: string; emoji: string }) => void;
 }
 
-type SocketData = {
+export type SocketData = {
   roomId?: string;
   userId?: string;
 };

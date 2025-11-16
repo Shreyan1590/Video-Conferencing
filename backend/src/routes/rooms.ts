@@ -219,10 +219,11 @@ router.put('/schedules/:code', authMiddleware, async (req: AuthRequest, res) => 
       { returnDocument: 'after' }
     );
 
-    const schedule = result.value;
-    if (!schedule) {
+    if (!result || !result.value) {
       return res.status(404).json({ message: 'Schedule not found' });
     }
+
+    const schedule = result.value;
 
     return res.json({
       schedule: {

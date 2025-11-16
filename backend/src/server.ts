@@ -8,7 +8,12 @@ import { ENV } from './config/env';
 import { initMongo } from './db/mongo';
 import authRoutes from './routes/auth';
 import roomsRoutes from './routes/rooms';
-import { registerSignalingHandlers } from './sockets/signaling';
+import {
+  ClientToServerEvents,
+  ServerToClientEvents,
+  SocketData,
+  registerSignalingHandlers
+} from './sockets/signaling';
 
 const start = async () => {
   await initMongo();
@@ -33,12 +38,15 @@ const start = async () => {
 
   const server = http.createServer(app);
 
-  const io = new Server(server, {
-    cors: {
-      origin: ENV.CORS_ORIGIN,
-      credentials: true
+  const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(
+    server,
+    {
+      cors: {
+        origin: ENV.CORS_ORIGIN,
+        credentials: true
+      }
     }
-  });
+  );
 
   registerSignalingHandlers(io);
 
