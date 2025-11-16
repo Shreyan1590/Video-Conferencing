@@ -1,0 +1,33 @@
+version: '3.9'
+
+services:
+  backend:
+    build: ./backend
+    container_name: vc-backend
+    ports:
+      - '4000:4000'
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - CORS_ORIGIN=http://localhost:5173
+      - JWT_SECRET=change_me_in_production
+    networks:
+      - vc-net
+
+  frontend:
+    build: ./frontend
+    container_name: vc-frontend
+    ports:
+      - '5173:5173'
+    depends_on:
+      - backend
+    environment:
+      - VITE_BACKEND_URL=http://localhost:4000
+    networks:
+      - vc-net
+
+networks:
+  vc-net:
+    driver: bridge
+
+
