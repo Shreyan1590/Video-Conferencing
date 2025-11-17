@@ -1,9 +1,7 @@
 import { Router } from 'express';
-import type { ModifyResult } from 'mongodb';
 
 import { getCollections } from '../db/mongo';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import type { ScheduledRoomDocument } from '../db/mongo';
 
 const router = Router();
 
@@ -221,10 +219,12 @@ router.put('/schedules/:code', authMiddleware, async (req: AuthRequest, res) => 
       { returnDocument: 'after' }
     );
 
-    const schedule = (result as ModifyResult<ScheduledRoomDocument>).value ?? null;
-    if (!schedule) {
+    // MongoDB findOneAndUpdate with returnDocument: 'after' returns the document directly
+    if (!result) {
       return res.status(404).json({ message: 'Schedule not found' });
     }
+    
+    const schedule = result;
 
     return res.json({
       schedule: {
