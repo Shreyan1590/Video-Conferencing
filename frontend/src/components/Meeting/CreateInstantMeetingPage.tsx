@@ -99,13 +99,18 @@ export const CreateInstantMeetingPage: React.FC = () => {
                 onChange={(e) => handleChange('allowedEmailDomain', e.target.value)}
               />
             </label>
-            <label>
+            <label className="toggle-label">
               <span>Participants can join only after the Host joins</span>
-              <input
-                type="checkbox"
-                checked={form.hostFirstJoin}
-                onChange={(e) => handleChange('hostFirstJoin', e.target.checked as unknown as string)}
-              />
+              <button
+                type="button"
+                className={`toggle-switch ${form.hostFirstJoin ? 'toggle-switch-active' : ''}`}
+                onClick={() => handleChange('hostFirstJoin', (!form.hostFirstJoin) as unknown as string)}
+                aria-label="Toggle host first join"
+                role="switch"
+                aria-checked={form.hostFirstJoin}
+              >
+                <span className="toggle-slider" />
+              </button>
             </label>
             {error && <p className="error-text">{error}</p>}
             <div className="schedule-form-actions">

@@ -163,13 +163,18 @@ export const ScheduleMeetingPage: React.FC = () => {
                 onChange={(e) => handleChange('allowedEmailDomain', e.target.value)}
               />
             </label>
-            <label>
+            <label className="toggle-label">
               <span>Participants can join only after the Host joins</span>
-              <input
-                type="checkbox"
-                checked={form.hostFirstJoin}
-                onChange={(e) => setForm((prev) => ({ ...prev, hostFirstJoin: e.target.checked }))}
-              />
+              <button
+                type="button"
+                className={`toggle-switch ${form.hostFirstJoin ? 'toggle-switch-active' : ''}`}
+                onClick={() => setForm((prev) => ({ ...prev, hostFirstJoin: !prev.hostFirstJoin }))}
+                aria-label="Toggle host first join"
+                role="switch"
+                aria-checked={form.hostFirstJoin}
+              >
+                <span className="toggle-slider" />
+              </button>
             </label>
             {error && <p className="error-text">{error}</p>}
             <div className="schedule-form-actions">

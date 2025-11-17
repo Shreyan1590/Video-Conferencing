@@ -538,6 +538,103 @@ input {
     font-size: 0.9rem;
 }
 
+/* Toggle Switch Styles */
+.toggle-label {
+    display: flex;
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    cursor: pointer;
+    padding: 0.75rem;
+    border-radius: 0.75rem;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    transition: all 0.2s ease-out;
+}
+
+.toggle-label:hover {
+    background: rgba(15, 23, 42, 0.7);
+    border-color: rgba(148, 163, 184, 0.5);
+}
+
+.toggle-label span {
+    flex: 1;
+    font-size: 0.9rem;
+    color: #e5e7eb;
+    user-select: none;
+}
+
+.toggle-switch {
+    position: relative;
+    width: 52px;
+    height: 28px;
+    background: rgba(51, 65, 85, 0.9);
+    border: 2px solid rgba(148, 163, 184, 0.4);
+    border-radius: 999px;
+    cursor: pointer;
+    padding: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+    flex-shrink: 0;
+}
+
+.toggle-switch:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
+}
+
+.toggle-switch:hover {
+    border-color: rgba(148, 163, 184, 0.6);
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.1);
+}
+
+.toggle-switch-active {
+    background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.15), 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.toggle-switch-active:hover {
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.2), 0 6px 16px rgba(59, 130, 246, 0.4);
+}
+
+.toggle-slider {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: #ffffff;
+    border-radius: 50%;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.1);
+    transform: translateX(0);
+}
+
+.toggle-switch-active .toggle-slider {
+    transform: translateX(24px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Smooth animation for the toggle background */
+.toggle-switch::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+    opacity: 0;
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.toggle-switch-active::before {
+    opacity: 1;
+}
+
 .schedule-form input[type='text'],
 .schedule-form input[type='datetime-local'],
 .schedule-form textarea {
