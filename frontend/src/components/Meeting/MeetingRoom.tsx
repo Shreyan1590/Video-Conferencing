@@ -249,6 +249,7 @@ const MeetingRoomInner: React.FC<MeetingRoomInnerProps> = ({
   } = useWebRTC(roomCode, userId, user?.fullName ?? userId, {
     isHost,
     initialStream,
+    username: user?.username,
     onMeetingEnded: ({ durationMs }) => {
       setMeetingDurationLabel(`Ended · ${formatDuration(durationMs)}`);
     }

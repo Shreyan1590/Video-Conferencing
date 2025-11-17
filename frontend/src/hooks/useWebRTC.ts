@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useSocket } from '../context/SocketContext';
 
@@ -22,6 +22,7 @@ export const useWebRTC = (
     isHost?: boolean;
     initialStream?: MediaStream | null;
     onMeetingEnded?: (info: { endTime: number; durationMs: number }) => void;
+    username?: string;
   }
 ) => {
   const { socket } = useSocket();
@@ -64,7 +65,7 @@ export const useWebRTC = (
       }
 
       setLocalStream(stream);
-      socket.emit('join-room', { roomId, userId, fullName });
+      socket.emit('join-room', { roomId, userId, fullName, username: options?.username });
       setConnectionStatus('connected');
     };
 
@@ -112,12 +113,66 @@ export const useWebRTC = (
       return pc;
     };
 
+    const handleParticipantsList = async ({
+      participants
+    }: {
+      participants: Array<{
+        userId: string;
+        fullName: string;
+        username?: string;
+        isHost: boolean;
+        muted: boolean;
+        videoEnabled: boolean;
+        screenSharing: boolean;
+        joinedAt: number;
+      }>;
+    }) => {
+      // Create peer connections for all existing participants (except self)
+      const otherParticipants = participants.filter((p) => p.userId !== userId);
+
+      for (const participant of otherParticipants) {
+        const already = peersRef.current.get(participant.userId);
+        if (already) continue;
+
+        const pc = createPeerConnection(participant.userId);
+        peersRef.current.set(participant.userId, pc);
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit('signal', {
+              roomId,
+              to: participant.userId,
+              from: userId,
+              signal: { candidate: event.candidate }
+            });
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        socket.emit('signal', {
+          roomId,
+          to: participant.userId,
+          from: userId,
+          signal: { sdp: offer }
+        });
+
+        setRemoteStreams((prev) => [
+          ...prev,
+          { userId: participant.userId, fullName: participant.fullName, stream: new MediaStream() }
+        ]);
+      }
+    };
+
     const handleUserJoined = async ({
       userId: remoteId,
       fullName: remoteFullName
     }: {
       userId: string;
       fullName: string;
+      username?: string;
+      isHost: boolean;
     }) => {
       const already = peersRef.current.get(remoteId);
       if (already) return;
@@ -274,7 +329,37 @@ export const useWebRTC = (
       }
     };
 
+    const handleParticipantStatusUpdate = ({
+      userId: remoteId,
+      muted: remoteMuted,
+      videoEnabled: remoteVideoEnabled,
+      screenSharing: remoteScreenSharing
+    }: {
+      userId: string;
+      muted?: boolean;
+      videoEnabled?: boolean;
+      screenSharing?: boolean;
+    }) => {
+      // Update remote participant status in UI if needed
+      // This is mainly for UI indicators, actual media streams are handled by WebRTC
+      setRemoteStreams((prev) =>
+        prev.map((s) => {
+          if (s.userId === remoteId) {
+            return {
+              ...s,
+              muted: remoteMuted ?? s.muted,
+              videoEnabled: remoteVideoEnabled ?? s.videoEnabled,
+              screenSharing: remoteScreenSharing ?? s.screenSharing
+            };
+          }
+          return s;
+        })
+      );
+    };
+
+    socket.on('participants-list', handleParticipantsList);
     socket.on('user-joined', handleUserJoined);
+    socket.on('participant-status-update', handleParticipantStatusUpdate);
     socket.on('signal', handleSignal);
     socket.on('user-left', handleUserLeft);
     socket.on('meeting-start', handleMeetingStart);
@@ -282,37 +367,43 @@ export const useWebRTC = (
     socket.on('host-command', handleHostCommand);
 
     return () => {
+      socket.off('participants-list', handleParticipantsList);
       socket.off('user-joined', handleUserJoined);
+      socket.off('participant-status-update', handleParticipantStatusUpdate);
       socket.off('signal', handleSignal);
       socket.off('user-left', handleUserLeft);
       socket.off('meeting-start', handleMeetingStart);
       socket.off('meeting-end', handleMeetingEnd);
       socket.off('host-command', handleHostCommand);
     };
-  }, [elapsedMs, localStream, options, roomId, socket, userId]);
+    }, [elapsedMs, localStream, options, roomId, socket, userId]);
 
-  const toggleMute = () => {
-    if (!localStream) return;
-    const enabled = !muted;
+  const toggleMute = useCallback(() => {
+    if (!localStream || !socket) return;
+    const newMuted = !muted;
     localStream.getAudioTracks().forEach((t) => {
       // eslint-disable-next-line no-param-reassign
-      t.enabled = enabled;
+      t.enabled = !newMuted; // enabled is opposite of muted
     });
-    setMuted(!muted);
-  };
+    setMuted(newMuted);
+    // Broadcast status update
+    socket.emit('participant-status-update', { roomId, userId, muted: newMuted });
+  }, [localStream, socket, muted, roomId, userId]);
 
-  const toggleVideo = () => {
-    if (!localStream) return;
-    const enabled = !videoEnabled;
+  const toggleVideo = useCallback(() => {
+    if (!localStream || !socket) return;
+    const newVideoEnabled = !videoEnabled;
     localStream.getVideoTracks().forEach((t) => {
       // eslint-disable-next-line no-param-reassign
-      t.enabled = enabled;
+      t.enabled = newVideoEnabled;
     });
-    setVideoEnabled(!videoEnabled);
-  };
+    setVideoEnabled(newVideoEnabled);
+    // Broadcast status update
+    socket.emit('participant-status-update', { roomId, userId, videoEnabled: newVideoEnabled });
+  }, [localStream, socket, videoEnabled, roomId, userId]);
 
   const startScreenShare = async () => {
-    if (!localStream || screenSharing) return;
+    if (!localStream || screenSharing || !socket) return;
     try {
       const screenStream = await (navigator.mediaDevices as any).getDisplayMedia({
         video: true,
@@ -328,6 +419,9 @@ export const useWebRTC = (
       localStream.addTrack(screenTrack);
       screenTrackRef.current = screenTrack;
       setScreenSharing(true);
+
+      // Broadcast status update
+      socket.emit('participant-status-update', { roomId, userId, screenSharing: true });
 
       peersRef.current.forEach((pc) => {
         const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
@@ -346,7 +440,7 @@ export const useWebRTC = (
   };
 
   const stopScreenShare = () => {
-    if (!localStream || !screenSharing) return;
+    if (!localStream || !screenSharing || !socket) return;
     const screenTrack = screenTrackRef.current;
     if (screenTrack) {
       localStream.removeTrack(screenTrack);
@@ -365,6 +459,8 @@ export const useWebRTC = (
       }
     });
     setScreenSharing(false);
+    // Broadcast status update
+    socket.emit('participant-status-update', { roomId, userId, screenSharing: false });
   };
 
   const sendHostCommand = (data: {

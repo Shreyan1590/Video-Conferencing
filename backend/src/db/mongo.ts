@@ -55,6 +55,21 @@ export interface EmailOtpDocument {
   username?: string;
 }
 
+export interface MeetingParticipantDocument {
+  _id?: unknown;
+  roomId: string;
+  userId: string;
+  fullName: string;
+  username?: string;
+  joinedAt: Date;
+  leftAt?: Date;
+  isHost: boolean;
+  muted: boolean;
+  videoEnabled: boolean;
+  screenSharing: boolean;
+  socketId?: string;
+}
+
 export const initMongo = async () => {
   if (client && db) {
     return db;
@@ -79,6 +94,7 @@ const ensureIndexes = async (database: Db) => {
   const rooms = database.collection<RoomDocument>('rooms');
   const scheduledRooms = database.collection<ScheduledRoomDocument>('scheduledRooms');
   const emailOtps = database.collection<EmailOtpDocument>('emailOtps');
+  const meetingParticipants = database.collection<MeetingParticipantDocument>('meetingParticipants');
 
   const createSafeIndexes = async (collection: Collection<any>, indexSpecs: any) => {
     try {
@@ -123,6 +139,13 @@ const ensureIndexes = async (database: Db) => {
     { key: { email: 1 }, name: 'email_otp_email_idx' },
     { key: { expiresAt: 1 }, name: 'email_otp_expires_idx' }
   ]);
+
+  // Meeting Participants: fast lookup by roomId and userId, cleanup old entries
+  await createSafeIndexes(meetingParticipants, [
+    { key: { roomId: 1, userId: 1 }, name: 'participants_room_user_idx', unique: true },
+    { key: { roomId: 1, joinedAt: 1 }, name: 'participants_room_joined_idx' },
+    { key: { leftAt: 1 }, name: 'participants_left_idx' }
+  ]);
 };
 
 export const getCollections = () => {
@@ -134,7 +157,8 @@ export const getCollections = () => {
     users: db.collection<UserDocument>('users'),
     rooms: db.collection<RoomDocument>('rooms'),
     scheduledRooms: db.collection<ScheduledRoomDocument>('scheduledRooms'),
-    emailOtps: db.collection<EmailOtpDocument>('emailOtps')
+    emailOtps: db.collection<EmailOtpDocument>('emailOtps'),
+    meetingParticipants: db.collection<MeetingParticipantDocument>('meetingParticipants')
   };
 };
 
