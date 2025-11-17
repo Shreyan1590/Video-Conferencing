@@ -266,14 +266,27 @@ router.delete('/schedules/:code', authMiddleware, async (req: AuthRequest, res) 
 
 // Room lookup used by the client before joining.
 router.get('/:roomId', authMiddleware, async (req: AuthRequest, res) => {
-  const { roomId } = req.params;
+  // Normalize the room code: trim whitespace and convert to uppercase
+  const rawRoomId = req.params.roomId?.trim() || '';
+  const roomId = rawRoomId.toUpperCase();
   const now = Date.now();
+
+  // Validate format: XXX-XXXX-XXX
+  const MEETING_CODE_REGEX = /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{3}$/;
+  if (!MEETING_CODE_REGEX.test(roomId)) {
+    return res.status(400).json({ 
+      message: 'Invalid meeting code format. Expected format: XXX-XXXX-XXX' 
+    });
+  }
 
   try {
     const { rooms, scheduledRooms } = getCollections();
 
+    // Search for instant room (case-sensitive match since we normalized)
     const room = await rooms.findOne({ code: roomId });
     if (room) {
+      // eslint-disable-next-line no-console
+      console.log(`Found instant room: ${roomId} for user: ${req.user?.email}`);
       const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
       if (room.createdAt + oneWeekMs <= now) {
         return res.status(410).json({ message: 'Meeting has ended' });
@@ -309,10 +322,19 @@ router.get('/:roomId', authMiddleware, async (req: AuthRequest, res) => {
       });
     }
 
+    // Search for scheduled room (case-sensitive match since we normalized)
     const schedule = await scheduledRooms.findOne({ code: roomId });
     if (!schedule || schedule.deleted) {
-      return res.status(404).json({ message: 'Room not found' });
+      // Return 404 only if neither instant nor scheduled room exists
+      // eslint-disable-next-line no-console
+      console.log(`Room not found: ${roomId} for user: ${req.user?.email}`);
+      return res.status(404).json({ 
+        message: 'Meeting code not found. Please check the code and try again.' 
+      });
     }
+    
+    // eslint-disable-next-line no-console
+    console.log(`Found scheduled room: ${roomId} for user: ${req.user?.email}`);
 
     if (schedule.allowedEmailDomain) {
       const email = req.user?.email ?? '';

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { useAuth } from './context/AuthContext';
 import { LoginPage } from './components/Auth/LoginPage';
@@ -13,6 +13,8 @@ import { NotFoundPage } from './components/Common/NotFoundPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
+  const currentPath = location.pathname + location.search;
 
   if (loading) {
     return (
@@ -24,9 +26,43 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
       </div>
     );
   }
+  
   if (!user) {
-    return <Navigate to="/login" replace />;
+    // Preserve the current route so we can redirect back after login
+    // Only add redirect param if we're not already on login/register pages
+    const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
+    const redirectPath = !isAuthPage 
+      ? `?redirect=${encodeURIComponent(currentPath)}`
+      : '';
+    return <Navigate to={`/login${redirectPath}`} replace state={{ from: location }} />;
   }
+  
+  return children;
+};
+
+// Redirect logged-in users away from auth pages
+const AuthRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="auth-layout">
+        <div className="auth-card">
+          <div className="spinner-ring" />
+          <h1>Loading…</h1>
+        </div>
+      </div>
+    );
+  }
+
+  // If user is logged in, redirect to home or the redirect param
+  if (user) {
+    const params = new URLSearchParams(location.search);
+    const redirectTo = params.get('redirect') || '/';
+    return <Navigate to={redirectTo} replace />;
+  }
+
   return children;
 };
 
@@ -34,8 +70,22 @@ const App: React.FC = () => {
   return (
     <div className="app-root">
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        <Route
+          path="/login"
+          element={
+            <AuthRoute>
+              <LoginPage />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <AuthRoute>
+              <RegisterPage />
+            </AuthRoute>
+          }
+        />
         <Route
           path="/"
           element={

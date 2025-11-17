@@ -24,8 +24,12 @@ export const LoginPage: React.FC = () => {
     try {
       setLoading(true);
       const res = await apiClient.post('/auth/login', { email, password });
-      login(res.data.user);
-      navigate('/');
+      await login(res.data.user);
+      
+      // Get the redirect path from URL params or default to home
+      const params = new URLSearchParams(window.location.search);
+      const redirectTo = params.get('redirect') || '/';
+      navigate(redirectTo, { replace: true });
     } catch (err) {
       setError('Invalid credentials');
     } finally {

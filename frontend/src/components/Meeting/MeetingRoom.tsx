@@ -64,34 +64,37 @@ export const MeetingRoom: React.FC = () => {
         setRoomValid(true);
         setRoomError(null);
         setNormalizedCode(normalized);
-      } catch (err) {
+      } catch (err: any) {
         setRoomValid(false);
-        if (err && typeof err === 'object' && 'response' in (err as any)) {
-          const response = (err as any).response;
+        
+        if (err?.response) {
+          const response = err.response;
+          const status = response?.status;
           const message: string | undefined = response?.data?.message;
-          if (message === 'Meeting has not started yet') {
-            setRoomError('This meeting has not started yet.');
-            setChecking(false);
-            return;
-          }
-          if (message === 'Meeting has ended') {
+          
+          // Use the backend error message if available
+          if (message) {
+            setRoomError(message);
+          } else if (status === 400) {
+            setRoomError('Invalid meeting code format. Expected format: XXX-XXXX-XXX');
+          } else if (status === 401) {
+            setRoomError('Please sign in to join a meeting.');
+          } else if (status === 403) {
+            setRoomError('You do not have permission to join this meeting.');
+          } else if (status === 404) {
+            setRoomError('Meeting code not found. Please check the code and try again.');
+          } else if (status === 410) {
             setRoomError('This meeting has ended.');
-            setChecking(false);
-            return;
+          } else if (status >= 500) {
+            setRoomError('Server error. Please try again later.');
+          } else {
+            setRoomError('Failed to validate meeting code. Please try again.');
           }
-          if (message === 'This meeting is in private.') {
-            setRoomError('This meeting is in private.');
-            setChecking(false);
-            return;
-          }
-          if (response?.status === 404) {
-            setRoomError('This meeting code does not exist.');
-            setChecking(false);
-            return;
-          }
+        } else {
+          // Network error
+          setRoomError('Unable to connect to server. Please check your connection and try again.');
         }
-        setRoomError('This meeting code is invalid or has expired.');
-      } finally {
+        
         setChecking(false);
       }
     };

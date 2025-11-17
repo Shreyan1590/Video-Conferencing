@@ -114,8 +114,12 @@ export const RegisterPage: React.FC = () => {
         email,
         password
       });
-      login(res.data.user);
-      navigate('/');
+      await login(res.data.user);
+      
+      // Get the redirect path from URL params or default to home
+      const params = new URLSearchParams(window.location.search);
+      const redirectTo = params.get('redirect') || '/';
+      navigate(redirectTo, { replace: true });
     } catch (err) {
       setError('Registration failed');
     } finally {

@@ -104,43 +104,44 @@ export const LobbyPage: React.FC = () => {
       // Validate against backend so MeetingRoom can connect immediately.
       await api.get(`/rooms/${raw}`);
       navigate(`/room/${raw}`, { state: { validated: true } });
-    } catch (err) {
-      if (err && typeof err === 'object' && 'response' in (err as any)) {
-        const response = (err as any).response;
+    } catch (err: any) {
+      setJoining(false);
+      
+      if (err?.response) {
+        const response = err.response;
+        const status = response?.status;
         const message: string | undefined = response?.data?.message;
-        if (message === 'Meeting has not started yet') {
-          setError('This meeting has not started yet.');
-          triggerShake();
-          setJoining(false);
-          return;
-        }
-        if (message === 'Meeting has ended') {
-          setError('This meeting has ended.');
-          triggerShake();
-          setJoining(false);
-          return;
-        }
-        if (message === 'This meeting is in private.') {
-          setError('This meeting is in private.');
-          triggerShake();
-          setJoining(false);
-          return;
-        }
+        
+        // Handle specific messages
         if (message === 'Host has not joined yet') {
-          setJoining(false);
           navigate(`/waiting/${raw}`);
           return;
         }
-        if (response?.status === 404) {
-          setError('This meeting code does not exist.');
-          triggerShake();
-          setJoining(false);
-          return;
+        
+        // Use backend error message if available, otherwise use status-based messages
+        if (message) {
+          setError(message);
+        } else if (status === 400) {
+          setError('Invalid meeting code format. Please check the code and try again.');
+        } else if (status === 401) {
+          setError('Please sign in to join a meeting.');
+        } else if (status === 403) {
+          setError('You do not have permission to join this meeting.');
+        } else if (status === 404) {
+          setError('Meeting code not found. Please check the code and try again.');
+        } else if (status === 410) {
+          setError('This meeting has ended.');
+        } else if (status >= 500) {
+          setError('Server error. Please try again later.');
+        } else {
+          setError('Failed to join meeting. Please try again.');
         }
+      } else {
+        // Network error or other issue
+        setError('Unable to connect to server. Please check your connection and try again.');
       }
-      setError('This meeting code is invalid or has expired.');
+      
       triggerShake();
-      setJoining(false);
     }
   };
 
@@ -160,38 +161,42 @@ export const LobbyPage: React.FC = () => {
       setStartingCode(normalized);
       await api.get(`/rooms/${normalized}`);
       navigate(`/room/${normalized}`, { state: { validated: true } });
-    } catch (err) {
-      if (err && typeof err === 'object' && 'response' in (err as any)) {
-        const response = (err as any).response;
+    } catch (err: any) {
+      setStartingCode(null);
+      
+      if (err?.response) {
+        const response = err.response;
+        const status = response?.status;
         const message: string | undefined = response?.data?.message;
-        if (message === 'Meeting has not started yet') {
-          setError('This meeting has not started yet.');
-          setStartingCode(null);
-          return;
-        }
-        if (message === 'Meeting has ended') {
-          setError('This meeting has ended.');
-          setStartingCode(null);
-          return;
-        }
-         if (message === 'This meeting is in private.') {
-          setError('This meeting is in private.');
-          setStartingCode(null);
-          return;
-        }
+        
+        // Handle specific messages
         if (message === 'Host has not joined yet') {
-          setStartingCode(null);
           navigate(`/waiting/${normalized}`);
           return;
         }
-        if (response?.status === 404) {
-          setError('This meeting code does not exist.');
-          setStartingCode(null);
-          return;
+        
+        // Use backend error message if available, otherwise use status-based messages
+        if (message) {
+          setError(message);
+        } else if (status === 400) {
+          setError('Invalid meeting code format. Please check the code and try again.');
+        } else if (status === 401) {
+          setError('Please sign in to start the meeting.');
+        } else if (status === 403) {
+          setError('You do not have permission to start this meeting.');
+        } else if (status === 404) {
+          setError('Meeting code not found. Please check the code and try again.');
+        } else if (status === 410) {
+          setError('This meeting has ended.');
+        } else if (status >= 500) {
+          setError('Server error. Please try again later.');
+        } else {
+          setError('Failed to start meeting. Please try again.');
         }
+      } else {
+        // Network error or other issue
+        setError('Unable to connect to server. Please check your connection and try again.');
       }
-      setError('This meeting code is invalid or has expired.');
-      setStartingCode(null);
     }
   };
 
