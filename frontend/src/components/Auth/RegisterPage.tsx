@@ -114,14 +114,25 @@ export const RegisterPage: React.FC = () => {
         email,
         password
       });
+      
+      // Wait for login to complete and session to be verified
+      // This will retry up to 5 times to ensure cookie is available
       await login(res.data.user);
+      
+      // Small delay to ensure state updates propagate to all components
+      await new Promise((resolve) => setTimeout(resolve, 150));
       
       // Get the redirect path from URL params or default to home
       const params = new URLSearchParams(window.location.search);
       const redirectTo = params.get('redirect') || '/';
       navigate(redirectTo, { replace: true });
-    } catch (err) {
-      setError('Registration failed');
+    } catch (err: any) {
+      // Handle different error types
+      if (err?.message?.includes('verify session')) {
+        setError('Registration successful but session verification failed. Please try logging in.');
+      } else {
+        setError('Registration failed');
+      }
     } finally {
       setLoading(false);
     }

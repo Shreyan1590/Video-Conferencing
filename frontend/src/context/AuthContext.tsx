@@ -24,6 +24,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
   const userRef = useRef<User | null>(null);
+  const isLoggingInRef = useRef(false);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -68,6 +69,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Initial auth check on mount
   useEffect(() => {
     const initializeAuth = async () => {
+      // Don't initialize if we're in the middle of logging in
+      if (isLoggingInRef.current) {
+        return;
+      }
       setLoading(true);
       await refreshAuth();
       setInitialized(true);
@@ -90,18 +95,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [initialized, user, refreshAuth]);
 
   const login = useCallback(async (newUser: User) => {
-    // Set user immediately for optimistic UI
-    setUser(newUser);
+    // Set flag to prevent initial auth check from interfering
+    isLoggingInRef.current = true;
     
-    // Verify the session is actually valid by fetching from server
-    // This ensures the cookie was set correctly
     try {
-      await refreshAuth();
-    } catch {
-      // If verification fails, the user will be cleared by refreshAuth
-      // This handles cases where cookie wasn't set properly
+      // Verify the session is actually valid by fetching from server FIRST
+      // This ensures the cookie was set correctly before we set user state
+      // Retry a few times in case cookie isn't immediately available
+      let verified = false;
+      let attempts = 0;
+      const maxAttempts = 5; // Increased retries for cross-origin cookie delays
+      
+      while (!verified && attempts < maxAttempts) {
+        try {
+          const res = await apiClient.get<{ user: User }>('/auth/me');
+          // Only set user if verification succeeds
+          setUser(res.data.user);
+          verified = true;
+        } catch (err: any) {
+          const status = err?.response?.status;
+          attempts++;
+          
+          if (status === 401 && attempts >= maxAttempts) {
+            // If all retries fail with 401, cookie wasn't set properly
+            setUser(null);
+            throw new Error('Failed to verify session after login. Cookie may not have been set.');
+          }
+          
+          // For non-401 errors or if we haven't exhausted retries, wait and retry
+          if (attempts < maxAttempts) {
+            // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
+            await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempts - 1)));
+          } else {
+            // Last attempt failed
+            setUser(null);
+            throw new Error('Failed to verify session after login');
+          }
+        }
+      }
+      
+      // Fallback: if we somehow get here without verification, use the provided user
+      // This should not happen, but provides a safety net
+      if (!verified && newUser) {
+        setUser(newUser);
+      }
+    } finally {
+      // Clear flag after login completes
+      isLoggingInRef.current = false;
     }
-  }, [refreshAuth]);
+  }, []);
 
   const logout = useCallback(async () => {
     try {

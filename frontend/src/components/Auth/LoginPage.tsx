@@ -6,7 +6,7 @@ import { apiClient } from '../../services/api';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,14 +24,26 @@ export const LoginPage: React.FC = () => {
     try {
       setLoading(true);
       const res = await apiClient.post('/auth/login', { email, password });
+      
+      // Wait for login to complete and session to be verified
+      // This will retry up to 5 times to ensure cookie is available
+      // The login function will throw if verification fails
       await login(res.data.user);
+      
+      // Small delay to ensure state updates propagate to all components
+      await new Promise((resolve) => setTimeout(resolve, 150));
       
       // Get the redirect path from URL params or default to home
       const params = new URLSearchParams(window.location.search);
       const redirectTo = params.get('redirect') || '/';
       navigate(redirectTo, { replace: true });
-    } catch (err) {
-      setError('Invalid credentials');
+    } catch (err: any) {
+      // Handle different error types
+      if (err?.message?.includes('verify session') || err?.message?.includes('Cookie may not have been set')) {
+        setError('Login successful but session verification failed. Please check your browser settings and try again.');
+      } else {
+        setError('Invalid credentials');
+      }
     } finally {
       setLoading(false);
     }
