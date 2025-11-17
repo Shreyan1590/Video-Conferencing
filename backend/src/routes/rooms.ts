@@ -282,15 +282,20 @@ router.get('/:roomId', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { rooms, scheduledRooms } = getCollections();
 
-    // Search for instant room - use exact case-insensitive match
-    // Since codes are generated in uppercase, we search with the normalized code
-    // But also try case-insensitive search as fallback
+    // Search for instant room - use exact match first (codes are stored in uppercase)
+    // Fallback to case-insensitive search for robustness
     let room = await rooms.findOne({ code: roomId });
     if (!room) {
-      // Fallback: case-insensitive search (in case of data inconsistency)
+      // Fallback: case-insensitive search (escape special regex characters)
+      const escapedCode = roomId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       room = await rooms.findOne({ 
-        code: { $regex: new RegExp(`^${roomId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+        code: { $regex: new RegExp(`^${escapedCode}$`, 'i') }
       });
+      // If found via case-insensitive search, log for debugging
+      if (room) {
+        // eslint-disable-next-line no-console
+        console.warn(`Room found with case-insensitive search: ${roomId} (stored as: ${room.code})`);
+      }
     }
     
     if (room) {
@@ -334,11 +339,17 @@ router.get('/:roomId', authMiddleware, async (req: AuthRequest, res) => {
     // Search for scheduled room - use exact match first, then case-insensitive fallback
     let schedule = await scheduledRooms.findOne({ code: roomId, deleted: { $ne: true } });
     if (!schedule) {
-      // Fallback: case-insensitive search (in case of data inconsistency)
+      // Fallback: case-insensitive search (escape special regex characters)
+      const escapedCode = roomId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       schedule = await scheduledRooms.findOne({ 
-        code: { $regex: new RegExp(`^${roomId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        code: { $regex: new RegExp(`^${escapedCode}$`, 'i') },
         deleted: { $ne: true }
       });
+      // If found via case-insensitive search, log for debugging
+      if (schedule) {
+        // eslint-disable-next-line no-console
+        console.warn(`Scheduled room found with case-insensitive search: ${roomId} (stored as: ${schedule.code})`);
+      }
     }
     
     if (!schedule) {

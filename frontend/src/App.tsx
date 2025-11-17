@@ -12,11 +12,13 @@ import { WaitingRoomPage } from './components/Meeting/WaitingRoomPage';
 import { NotFoundPage } from './components/Common/NotFoundPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, initialized } = useAuth();
   const location = useLocation();
   const currentPath = location.pathname + location.search;
 
-  if (loading) {
+  // Wait for auth to initialize before making routing decisions
+  // This prevents redirect loops and ensures we check the actual session state
+  if (loading || !initialized) {
     return (
       <div className="auth-layout">
         <div className="auth-card">
@@ -27,6 +29,8 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
     );
   }
   
+  // Only redirect to login if we're sure the user is not authenticated
+  // After initialization, if user is null, they're truly not logged in
   if (!user) {
     // Preserve the current route so we can redirect back after login
     // Only add redirect param if we're not already on login/register pages
@@ -42,10 +46,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
 
 // Redirect logged-in users away from auth pages
 const AuthRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, initialized } = useAuth();
   const location = useLocation();
 
-  if (loading) {
+  // Wait for auth to initialize before making routing decisions
+  if (loading || !initialized) {
     return (
       <div className="auth-layout">
         <div className="auth-card">

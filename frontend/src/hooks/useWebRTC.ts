@@ -183,6 +183,17 @@ export const useWebRTC = (
         if (info) {
           info.state = pc.connectionState as PeerConnectionState;
           
+          // Update overall connection status based on all peer connections
+          const allStates = Array.from(peersRef.current.values()).map((i) => i.pc.connectionState);
+          const hasConnected = allStates.some((s) => s === 'connected');
+          const hasConnecting = allStates.some((s) => s === 'connecting' || s === 'checking');
+          
+          if (hasConnected) {
+            setConnectionStatus('connected');
+          } else if (hasConnecting || allStates.length > 0) {
+            setConnectionStatus('connecting');
+          }
+          
           if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
             setRemoteStreams((prev) => prev.filter((s) => s.userId !== peerId));
           }
@@ -227,18 +238,21 @@ export const useWebRTC = (
       setAllParticipants(participantsMap);
 
       // Create peer connections for all existing participants (except self)
-      // Since we're joining later, we become the initiator for all existing participants
+      // Use deterministic initiator selection (lower userId creates offer)
       const otherParticipants = participants.filter((p) => p.userId !== userId);
 
       for (const participant of otherParticipants) {
         const existing = peersRef.current.get(participant.userId);
         if (existing && existing.pc.connectionState !== 'closed') continue;
 
-        const info = createPeerConnection(participant.userId, true);
+        // Determine who should be initiator (lower userId)
+        const shouldBeInitiator = userId < participant.userId;
+        const info = createPeerConnection(participant.userId, shouldBeInitiator);
         peersRef.current.set(participant.userId, info);
 
+        // Set up ICE candidate handler (will be used after setLocalDescription)
         info.pc.onicecandidate = (event) => {
-          if (event.candidate && info.pc.connectionState !== 'closed') {
+          if (event.candidate && info.pc.connectionState !== 'closed' && info.pc.localDescription) {
             socket.emit('signal', {
               roomId,
               to: participant.userId,
@@ -248,17 +262,19 @@ export const useWebRTC = (
           }
         };
 
-        try {
-          const offer = await info.pc.createOffer();
-          await info.pc.setLocalDescription(offer);
-          info.state = 'connecting';
+        // Only create offer if we're the initiator
+        if (shouldBeInitiator) {
+          try {
+            const offer = await info.pc.createOffer();
+            await info.pc.setLocalDescription(offer);
+            info.state = 'connecting';
 
-          socket.emit('signal', {
-            roomId,
-            to: participant.userId,
-            from: userId,
-            signal: { sdp: offer }
-          });
+            socket.emit('signal', {
+              roomId,
+              to: participant.userId,
+              from: userId,
+              signal: { sdp: offer }
+            });
 
           // Add to remote streams even without stream yet (will be updated when track arrives)
           setRemoteStreams((prev) => {
@@ -300,7 +316,7 @@ export const useWebRTC = (
       username?: string;
       isHost: boolean;
     }) => {
-      // Add to participants list immediately
+      // Add to participants list immediately so UI updates instantly
       setAllParticipants((prev) => {
         const updated = new Map(prev);
         updated.set(remoteId, {
@@ -316,53 +332,83 @@ export const useWebRTC = (
         return updated;
       });
 
-      const existing = peersRef.current.get(remoteId);
-      if (existing && existing.pc.connectionState !== 'closed') return;
+      // Add to remote streams immediately (stream will be updated when track arrives)
+      setRemoteStreams((prev) => {
+        const exists = prev.find((s) => s.userId === remoteId);
+        if (!exists) {
+          return [
+            ...prev,
+            {
+              userId: remoteId,
+              fullName: remoteFullName,
+              stream: new MediaStream(),
+              muted: false,
+              videoEnabled: true,
+              screenSharing: false
+            }
+          ];
+        }
+        return prev;
+      });
 
-      // When a new user joins, we become the initiator
-      const info = createPeerConnection(remoteId, true);
+      const existing = peersRef.current.get(remoteId);
+      if (existing && existing.pc.connectionState !== 'closed') {
+        // Connection already exists, just update participant info
+        return;
+      }
+
+      // Determine who should be the initiator based on userId comparison
+      // This prevents both sides from creating offers simultaneously
+      // Lower userId becomes initiator
+      const shouldBeInitiator = userId < remoteId;
+
+      // When a new user joins, create peer connection
+      // We become the initiator if our userId is lower (deterministic)
+      const info = createPeerConnection(remoteId, shouldBeInitiator);
       peersRef.current.set(remoteId, info);
 
-      info.pc.onicecandidate = (event) => {
-        if (event.candidate && info.pc.connectionState !== 'closed') {
-          socket.emit('signal', {
-            roomId,
-            to: remoteId,
-            from: userId,
-            signal: { candidate: event.candidate }
-          });
+      // Set up ICE candidate handler AFTER creating offer
+      let iceCandidateHandler: ((event: RTCPeerConnectionIceEvent) => void) | null = null;
+
+      // Only create offer if we're the initiator
+      if (shouldBeInitiator) {
+        try {
+          const offer = await info.pc.createOffer();
+          await info.pc.setLocalDescription(offer);
+          info.state = 'connecting';
+
+          // Now set up ICE candidate handler - only after setLocalDescription
+          iceCandidateHandler = (event: RTCPeerConnectionIceEvent) => {
+            if (event.candidate && info.pc.connectionState !== 'closed' && info.pc.localDescription) {
+              socket.emit('signal', {
+                roomId,
+                to: remoteId,
+                from: userId,
+                signal: { candidate: event.candidate }
+              });
+            }
+          };
+          info.pc.onicecandidate = iceCandidateHandler;
+
+          socket.emit('signal', { roomId, to: remoteId, from: userId, signal: { sdp: offer } });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to create offer for new participant:', remoteId, err);
+          peersRef.current.delete(remoteId);
         }
-      };
-
-      try {
-        const offer = await info.pc.createOffer();
-        await info.pc.setLocalDescription(offer);
-        info.state = 'connecting';
-
-        socket.emit('signal', { roomId, to: remoteId, from: userId, signal: { sdp: offer } });
-
-        // Add to remote streams even without stream yet
-        setRemoteStreams((prev) => {
-          const exists = prev.find((s) => s.userId === remoteId);
-          if (!exists) {
-            return [
-              ...prev,
-              {
-                userId: remoteId,
-                fullName: remoteFullName,
-                stream: new MediaStream(),
-                muted: false,
-                videoEnabled: true,
-                screenSharing: false
-              }
-            ];
+      } else {
+        // We're the responder - wait for offer from the other side
+        // ICE candidate handler will be set up when we receive the offer and create answer
+        info.pc.onicecandidate = (event) => {
+          if (event.candidate && info.pc.connectionState !== 'closed' && info.pc.localDescription) {
+            socket.emit('signal', {
+              roomId,
+              to: remoteId,
+              from: userId,
+              signal: { candidate: event.candidate }
+            });
           }
-          return prev;
-        });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to create offer for new participant:', remoteId, err);
-        peersRef.current.delete(remoteId);
+        };
       }
     };
 
@@ -384,16 +430,7 @@ export const useWebRTC = (
         info = createPeerConnection(from, false);
         peersRef.current.set(from, info);
         
-        info.pc.onicecandidate = (event) => {
-          if (event.candidate && info.pc.connectionState !== 'closed') {
-            socket.emit('signal', {
-              roomId,
-              to: from,
-              from: userId,
-              signal: { candidate: event.candidate }
-            });
-          }
-        };
+        // ICE candidate handler will be set up after we set local description (in answer)
       }
 
       const pc = info.pc;
@@ -426,6 +463,18 @@ export const useWebRTC = (
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             info.state = 'connecting';
+            
+            // Set up ICE candidate handler AFTER setLocalDescription
+            pc.onicecandidate = (event) => {
+              if (event.candidate && pc.connectionState !== 'closed' && pc.localDescription) {
+                socket.emit('signal', {
+                  roomId,
+                  to: from,
+                  from: userId,
+                  signal: { candidate: event.candidate }
+                });
+              }
+            };
             
             socket.emit('signal', { roomId, to: from, from: userId, signal: { sdp: answer } });
           } else if (signal.sdp.type === 'answer') {
