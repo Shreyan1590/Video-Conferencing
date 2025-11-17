@@ -30,6 +30,33 @@ export const LobbyPage: React.FC = () => {
 
   const MEETING_CODE_REGEX = /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{3}$/;
 
+  // Format meeting code as user types: XXX-XXXX-XXX
+  const formatMeetingCode = (value: string): string => {
+    // Remove all non-alphanumeric characters and convert to uppercase
+    const cleaned = value.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    
+    // Limit to 10 characters (3+4+3)
+    const limited = cleaned.slice(0, 10);
+    
+    // Add dashes at positions 3 and 7
+    if (limited.length <= 3) {
+      return limited;
+    } else if (limited.length <= 7) {
+      return `${limited.slice(0, 3)}-${limited.slice(3)}`;
+    } else {
+      return `${limited.slice(0, 3)}-${limited.slice(3, 7)}-${limited.slice(7)}`;
+    }
+  };
+
+  const handleCodeInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatMeetingCode(e.target.value);
+    setJoinRoomId(formatted);
+    // Clear error when user starts typing
+    if (error) {
+      setError(null);
+    }
+  };
+
   useEffect(() => {
     // Only load schedules if user is authenticated
     if (!user) {
@@ -197,9 +224,15 @@ export const LobbyPage: React.FC = () => {
             <div className="join-row">
               <input
                 type="text"
-                placeholder="Enter a code or link"
+                placeholder="XXX-XXXX-XXX"
                 value={joinRoomId}
-                onChange={(e) => setJoinRoomId(e.target.value)}
+                onChange={handleCodeInputChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    void handleJoinRoom();
+                  }
+                }}
+                maxLength={12}
                 className={joinInputShake ? 'join-input input-error shake' : 'join-input'}
               />
               <button className="secondary-btn" onClick={handleJoinRoom} disabled={joining}>
