@@ -41,15 +41,28 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
 };
 
 export const clearAuthCookie = (res: Response) => {
-  res.clearCookie(COOKIE_NAME);
+  const isProduction = ENV.NODE_ENV === 'production';
+  const isCrossOrigin = ENV.CORS_ORIGIN && ENV.CORS_ORIGIN !== 'http://localhost:5173';
+  
+  res.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: isCrossOrigin ? 'none' : 'lax',
+    secure: isProduction || isCrossOrigin,
+    path: '/'
+  });
 };
 
 export const setAuthCookie = (res: Response, token: string) => {
+  // For cross-origin requests, we need sameSite: 'none' and secure: true
+  const isProduction = ENV.NODE_ENV === 'production';
+  const isCrossOrigin = ENV.CORS_ORIGIN && ENV.CORS_ORIGIN !== 'http://localhost:5173';
+  
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: ENV.NODE_ENV === 'production',
-    maxAge: 8 * 60 * 60 * 1000 // 8 hours
+    sameSite: isCrossOrigin ? 'none' : 'lax', // 'none' required for cross-origin
+    secure: isProduction || isCrossOrigin, // Must be true when sameSite is 'none'
+    maxAge: 8 * 60 * 60 * 1000, // 8 hours
+    path: '/' // Ensure cookie is available for all paths
   });
 };
 
