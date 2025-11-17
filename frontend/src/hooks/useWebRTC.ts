@@ -6,6 +6,19 @@ interface RemoteStreamInfo {
   userId: string;
   fullName: string;
   stream: MediaStream;
+  muted?: boolean;
+  videoEnabled?: boolean;
+  screenSharing?: boolean;
+}
+
+type PeerConnectionState = 'new' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'closed';
+
+interface PeerConnectionInfo {
+  pc: RTCPeerConnection;
+  state: PeerConnectionState;
+  isInitiator: boolean;
+  pendingOffer?: RTCSessionDescriptionInit;
+  pendingAnswer?: RTCSessionDescriptionInit;
 }
 const ICE_SERVERS: RTCIceServer[] = [
   {
@@ -38,7 +51,7 @@ export const useWebRTC = (
   const [screenSharing, setScreenSharing] = useState(false);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const cameraTracksRef = useRef<MediaStreamTrack[]>([]);
-  const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const peersRef = useRef<Map<string, PeerConnectionInfo>>(new Map());
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -74,7 +87,11 @@ export const useWebRTC = (
     return () => {
       isCancelled = true;
       localStream?.getTracks().forEach((t) => t.stop());
-      peersRef.current.forEach((peer) => peer.close());
+      peersRef.current.forEach((info) => {
+        if (info.pc.connectionState !== 'closed') {
+          info.pc.close();
+        }
+      });
       peersRef.current.clear();
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -90,27 +107,55 @@ export const useWebRTC = (
   useEffect(() => {
     if (!socket) return;
 
-    const createPeerConnection = (peerId: string) => {
+    const createPeerConnection = (peerId: string, isInitiator: boolean = false): PeerConnectionInfo => {
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
+      // Add local tracks to the peer connection immediately
+      // This ensures all participants receive our stream
       if (localStream) {
-        localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+        localStream.getTracks().forEach((track) => {
+          try {
+            // Check if track is already added to avoid duplicates
+            const existingSender = pc.getSenders().find((s) => s.track?.id === track.id);
+            if (!existingSender) {
+              pc.addTrack(track, localStream);
+            }
+          } catch (err) {
+            // Track might already be added, ignore
+            // eslint-disable-next-line no-console
+            console.warn('Failed to add track to peer connection:', err);
+          }
+        });
       }
 
       pc.ontrack = (event) => {
         const [stream] = event.streams;
-        setRemoteStreams((prev) =>
-          prev.map((s) => (s.userId === peerId ? { ...s, stream } : s))
-        );
+        setRemoteStreams((prev) => {
+          const existing = prev.find((s) => s.userId === peerId);
+          if (existing) {
+            return prev.map((s) => (s.userId === peerId ? { ...s, stream } : s));
+          }
+          // If stream doesn't exist yet, we'll add it when we get participant info
+          return prev;
+        });
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-          setRemoteStreams((prev) => prev.filter((s) => s.userId !== peerId));
+        const info = peersRef.current.get(peerId);
+        if (info) {
+          info.state = pc.connectionState as PeerConnectionState;
+          
+          if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+            setRemoteStreams((prev) => prev.filter((s) => s.userId !== peerId));
+          }
         }
       };
 
-      return pc;
+      return {
+        pc,
+        state: 'new',
+        isInitiator
+      };
     };
 
     const handleParticipantsList = async ({
@@ -128,17 +173,18 @@ export const useWebRTC = (
       }>;
     }) => {
       // Create peer connections for all existing participants (except self)
+      // Since we're joining later, we become the initiator for all existing participants
       const otherParticipants = participants.filter((p) => p.userId !== userId);
 
       for (const participant of otherParticipants) {
-        const already = peersRef.current.get(participant.userId);
-        if (already) continue;
+        const existing = peersRef.current.get(participant.userId);
+        if (existing && existing.pc.connectionState !== 'closed') continue;
 
-        const pc = createPeerConnection(participant.userId);
-        peersRef.current.set(participant.userId, pc);
+        const info = createPeerConnection(participant.userId, true);
+        peersRef.current.set(participant.userId, info);
 
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
+        info.pc.onicecandidate = (event) => {
+          if (event.candidate && info.pc.connectionState !== 'closed') {
             socket.emit('signal', {
               roomId,
               to: participant.userId,
@@ -148,20 +194,40 @@ export const useWebRTC = (
           }
         };
 
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+        try {
+          const offer = await info.pc.createOffer();
+          await info.pc.setLocalDescription(offer);
+          info.state = 'connecting';
 
-        socket.emit('signal', {
-          roomId,
-          to: participant.userId,
-          from: userId,
-          signal: { sdp: offer }
-        });
+          socket.emit('signal', {
+            roomId,
+            to: participant.userId,
+            from: userId,
+            signal: { sdp: offer }
+          });
 
-        setRemoteStreams((prev) => [
-          ...prev,
-          { userId: participant.userId, fullName: participant.fullName, stream: new MediaStream() }
-        ]);
+          setRemoteStreams((prev) => {
+            const exists = prev.find((s) => s.userId === participant.userId);
+            if (!exists) {
+              return [
+                ...prev,
+                {
+                  userId: participant.userId,
+                  fullName: participant.fullName,
+                  stream: new MediaStream(),
+                  muted: participant.muted,
+                  videoEnabled: participant.videoEnabled,
+                  screenSharing: participant.screenSharing
+                }
+              ];
+            }
+            return prev;
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to create offer for participant:', participant.userId, err);
+          peersRef.current.delete(participant.userId);
+        }
       }
     };
 
@@ -174,14 +240,15 @@ export const useWebRTC = (
       username?: string;
       isHost: boolean;
     }) => {
-      const already = peersRef.current.get(remoteId);
-      if (already) return;
+      const existing = peersRef.current.get(remoteId);
+      if (existing && existing.pc.connectionState !== 'closed') return;
 
-      const pc = createPeerConnection(remoteId);
-      peersRef.current.set(remoteId, pc);
+      // When a new user joins, we become the initiator
+      const info = createPeerConnection(remoteId, true);
+      peersRef.current.set(remoteId, info);
 
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
+      info.pc.onicecandidate = (event) => {
+        if (event.candidate && info.pc.connectionState !== 'closed') {
           socket.emit('signal', {
             roomId,
             to: remoteId,
@@ -191,12 +258,25 @@ export const useWebRTC = (
         }
       };
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+      try {
+        const offer = await info.pc.createOffer();
+        await info.pc.setLocalDescription(offer);
+        info.state = 'connecting';
 
-      socket.emit('signal', { roomId, to: remoteId, from: userId, signal: { sdp: offer } });
+        socket.emit('signal', { roomId, to: remoteId, from: userId, signal: { sdp: offer } });
 
-      setRemoteStreams((prev) => [...prev, { userId: remoteId, fullName: remoteFullName, stream: new MediaStream() }]);
+        setRemoteStreams((prev) => {
+          const exists = prev.find((s) => s.userId === remoteId);
+          if (!exists) {
+            return [...prev, { userId: remoteId, fullName: remoteFullName, stream: new MediaStream() }];
+          }
+          return prev;
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to create offer for new participant:', remoteId, err);
+        peersRef.current.delete(remoteId);
+      }
     };
 
     const handleSignal = async ({
@@ -210,12 +290,15 @@ export const useWebRTC = (
     }) => {
       if (to !== userId) return;
 
-      let pc = peersRef.current.get(from);
-      if (!pc) {
-        pc = createPeerConnection(from);
-        peersRef.current.set(from, pc);
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
+      let info = peersRef.current.get(from);
+      if (!info) {
+        // If we receive a signal from someone we don't have a connection with,
+        // they're the initiator, so we become the responder
+        info = createPeerConnection(from, false);
+        peersRef.current.set(from, info);
+        
+        info.pc.onicecandidate = (event) => {
+          if (event.candidate && info.pc.connectionState !== 'closed') {
             socket.emit('signal', {
               roomId,
               to: from,
@@ -226,26 +309,78 @@ export const useWebRTC = (
         };
       }
 
+      const pc = info.pc;
+
+      // Check if connection is closed
+      if (pc.connectionState === 'closed') {
+        return;
+      }
+
       if (signal.sdp) {
-        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-        if (signal.sdp.type === 'offer') {
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socket.emit('signal', { roomId, to: from, from: userId, signal: { sdp: answer } });
+        try {
+          // Prevent duplicate SDP processing
+          const currentRemoteDesc = pc.remoteDescription;
+          if (currentRemoteDesc && signal.sdp.type === currentRemoteDesc.type) {
+            // Already processed this type of SDP, ignore
+            return;
+          }
+
+          // Check if we're in the right state
+          if (signal.sdp.type === 'offer') {
+            // We're receiving an offer, so we need to be in 'stable' or 'have-local-offer' state
+            // If we already have a local offer, we should ignore this (or handle renegotiation)
+            if (pc.signalingState === 'have-local-offer') {
+              // We already sent an offer, this might be a duplicate or renegotiation
+              // For now, ignore duplicate offers
+              return;
+            }
+
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            info.state = 'connecting';
+            
+            socket.emit('signal', { roomId, to: from, from: userId, signal: { sdp: answer } });
+          } else if (signal.sdp.type === 'answer') {
+            // We're receiving an answer to our offer
+            // We should be in 'have-local-offer' state
+            if (pc.signalingState !== 'have-local-offer' && pc.signalingState !== 'have-remote-offer') {
+              // Wrong state, might be a duplicate answer
+              return;
+            }
+
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+            info.state = 'connecting';
+          }
+        } catch (err: any) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to process SDP:', err?.message, 'State:', pc.signalingState);
+          // If it's an InvalidStateError, the connection might be in the wrong state
+          // This can happen with duplicate messages, so we'll just ignore it
         }
       } else if (signal.candidate) {
         try {
-          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-        } catch {
-          // Ignore ICE candidate errors for now
+          // Only add ICE candidate if we have remote description set
+          if (pc.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+          } else {
+            // Store candidate for later if we don't have remote description yet
+            // This is handled automatically by the browser in most cases
+          }
+        } catch (err) {
+          // Ignore ICE candidate errors (duplicates, invalid candidates, etc.)
+          // eslint-disable-next-line no-console
+          console.warn('Failed to add ICE candidate:', err);
         }
       }
     };
 
     const handleUserLeft = ({ userId: remoteId }: { userId: string }) => {
-      const pc = peersRef.current.get(remoteId);
-      if (pc) {
-        pc.close();
+      const info = peersRef.current.get(remoteId);
+      if (info) {
+        if (info.pc.connectionState !== 'closed') {
+          info.pc.close();
+        }
         peersRef.current.delete(remoteId);
       }
       setRemoteStreams((prev) => prev.filter((s) => s.userId !== remoteId));
@@ -323,7 +458,11 @@ export const useWebRTC = (
           window.clearInterval(timerRef.current);
         }
         localStream?.getTracks().forEach((t) => t.stop());
-        peersRef.current.forEach((peer) => peer.close());
+        peersRef.current.forEach((info) => {
+          if (info.pc.connectionState !== 'closed') {
+            info.pc.close();
+          }
+        });
         peersRef.current.clear();
         window.location.href = '/';
       }
@@ -376,7 +515,30 @@ export const useWebRTC = (
       socket.off('meeting-end', handleMeetingEnd);
       socket.off('host-command', handleHostCommand);
     };
-    }, [elapsedMs, localStream, options, roomId, socket, userId]);
+  }, [elapsedMs, localStream, options, roomId, socket, userId]);
+
+  // Update all peer connections when localStream changes (e.g., when tracks are added/removed)
+  useEffect(() => {
+    if (!localStream) return;
+
+    peersRef.current.forEach((info, peerId) => {
+      if (info.pc.connectionState === 'closed') return;
+
+      // Ensure all local tracks are added to this peer connection
+      localStream.getTracks().forEach((track) => {
+        const existingSender = info.pc.getSenders().find((s) => s.track?.id === track.id);
+        if (!existingSender) {
+          try {
+            info.pc.addTrack(track, localStream);
+          } catch (err) {
+            // Track might already be added or connection in wrong state
+            // eslint-disable-next-line no-console
+            console.warn('Failed to add track to peer connection:', peerId, err);
+          }
+        }
+      });
+    });
+  }, [localStream]);
 
   const toggleMute = useCallback(() => {
     if (!localStream || !socket) return;
@@ -423,11 +585,13 @@ export const useWebRTC = (
       // Broadcast status update
       socket.emit('participant-status-update', { roomId, userId, screenSharing: true });
 
-      peersRef.current.forEach((pc) => {
-        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-        if (sender) {
-          // eslint-disable-next-line @typescript-eslint/no-floating-promises
-          sender.replaceTrack(screenTrack);
+      peersRef.current.forEach((info) => {
+        if (info.pc.connectionState !== 'closed') {
+          const sender = info.pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+          if (sender) {
+            // eslint-disable-next-line @typescript-eslint/no-floating-promises
+            sender.replaceTrack(screenTrack);
+          }
         }
       });
 
@@ -450,12 +614,14 @@ export const useWebRTC = (
     cameraTracksRef.current.forEach((t) => {
       localStream.addTrack(t);
     });
-    peersRef.current.forEach((pc) => {
-      const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-      const cameraTrack = cameraTracksRef.current[0];
-      if (sender && cameraTrack) {
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        sender.replaceTrack(cameraTrack);
+    peersRef.current.forEach((info) => {
+      if (info.pc.connectionState !== 'closed') {
+        const sender = info.pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        const cameraTrack = cameraTracksRef.current[0];
+        if (sender && cameraTrack) {
+          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+          sender.replaceTrack(cameraTrack);
+        }
       }
     });
     setScreenSharing(false);

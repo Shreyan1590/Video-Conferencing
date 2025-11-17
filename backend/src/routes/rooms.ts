@@ -282,8 +282,17 @@ router.get('/:roomId', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { rooms, scheduledRooms } = getCollections();
 
-    // Search for instant room (case-sensitive match since we normalized)
-    const room = await rooms.findOne({ code: roomId });
+    // Search for instant room - use exact case-insensitive match
+    // Since codes are generated in uppercase, we search with the normalized code
+    // But also try case-insensitive search as fallback
+    let room = await rooms.findOne({ code: roomId });
+    if (!room) {
+      // Fallback: case-insensitive search (in case of data inconsistency)
+      room = await rooms.findOne({ 
+        code: { $regex: new RegExp(`^${roomId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+      });
+    }
+    
     if (room) {
       // eslint-disable-next-line no-console
       console.log(`Found instant room: ${roomId} for user: ${req.user?.email}`);
@@ -322,9 +331,17 @@ router.get('/:roomId', authMiddleware, async (req: AuthRequest, res) => {
       });
     }
 
-    // Search for scheduled room (case-sensitive match since we normalized)
-    const schedule = await scheduledRooms.findOne({ code: roomId });
-    if (!schedule || schedule.deleted) {
+    // Search for scheduled room - use exact match first, then case-insensitive fallback
+    let schedule = await scheduledRooms.findOne({ code: roomId, deleted: { $ne: true } });
+    if (!schedule) {
+      // Fallback: case-insensitive search (in case of data inconsistency)
+      schedule = await scheduledRooms.findOne({ 
+        code: { $regex: new RegExp(`^${roomId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        deleted: { $ne: true }
+      });
+    }
+    
+    if (!schedule) {
       // Return 404 only if neither instant nor scheduled room exists
       // eslint-disable-next-line no-console
       console.log(`Room not found: ${roomId} for user: ${req.user?.email}`);
