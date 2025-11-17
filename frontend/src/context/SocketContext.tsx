@@ -11,7 +11,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    const s = io('http://localhost:4000', {
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4000';
+    const s = io(socketUrl, {
       path: '/socket.io',
       transports: ['websocket'],
       withCredentials: true
