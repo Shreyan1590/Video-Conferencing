@@ -485,10 +485,31 @@ const VideoTile: React.FC<VideoTileProps> = ({ label, stream, mutedMirror }) => 
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
 
   React.useEffect(() => {
-    if (videoRef.current && stream) {
-      // eslint-disable-next-line no-param-reassign
-      videoRef.current.srcObject = stream;
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (stream) {
+      // Set the stream source
+      video.srcObject = stream;
+      
+      // Ensure video plays
+      video.play().catch((err) => {
+        // Auto-play might be blocked, but that's okay
+        // User can click to play
+        // eslint-disable-next-line no-console
+        console.debug('Video autoplay prevented:', err);
+      });
+    } else {
+      // Clear stream if null
+      video.srcObject = null;
     }
+
+    // Cleanup
+    return () => {
+      if (video) {
+        video.srcObject = null;
+      }
+    };
   }, [stream]);
 
   return (

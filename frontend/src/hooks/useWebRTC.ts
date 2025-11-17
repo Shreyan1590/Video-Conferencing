@@ -123,33 +123,52 @@ export const useWebRTC = (
     const createPeerConnection = (peerId: string, isInitiator: boolean = false): PeerConnectionInfo => {
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
-      // Add local tracks to the peer connection immediately
-      // This ensures all participants receive our stream
+      // Add ALL local tracks to peer connection immediately
+      // This ensures the other peer receives our media (audio, video, screen share)
+      // This must be done before creating offer/answer
       if (localStream) {
         localStream.getTracks().forEach((track) => {
-          try {
-            // Check if track is already added to avoid duplicates
-            const existingSender = pc.getSenders().find((s) => s.track?.id === track.id);
-            if (!existingSender) {
+          // Check if track is already added to avoid duplicates
+          const existingSender = pc.getSenders().find((s) => s.track?.id === track.id);
+          if (!existingSender && track.readyState !== 'ended') {
+            try {
               pc.addTrack(track, localStream);
+              // eslint-disable-next-line no-console
+              console.log(`Added ${track.kind} track to peer connection for ${peerId}`);
+            } catch (err) {
+              // Track might already be added or connection in wrong state
+              // eslint-disable-next-line no-console
+              console.warn('Failed to add track to peer connection:', err);
             }
-          } catch (err) {
-            // Track might already be added, ignore
-            // eslint-disable-next-line no-console
-            console.warn('Failed to add track to peer connection:', err);
           }
         });
       }
 
       pc.ontrack = (event) => {
         const [stream] = event.streams;
-        if (!stream || stream.getTracks().length === 0) return;
+        if (!stream) return;
         
-        // Update remote streams
+        // Even if stream has no tracks yet, we should still set it up
+        // Tracks might be added later (e.g., when user enables video)
+        
+        // Update remote streams - this will trigger UI update
         setRemoteStreams((prev) => {
           const existing = prev.find((s) => s.userId === peerId);
           if (existing) {
-            return prev.map((s) => (s.userId === peerId ? { ...s, stream } : s));
+            // Update existing stream - merge tracks if needed
+            const updatedStream = existing.stream;
+            stream.getTracks().forEach((track) => {
+              // Check if track already exists
+              const existingTrack = updatedStream.getTrackById(track.id);
+              if (!existingTrack) {
+                updatedStream.addTrack(track);
+              } else if (existingTrack.readyState === 'ended') {
+                // Replace ended track
+                updatedStream.removeTrack(existingTrack);
+                updatedStream.addTrack(track);
+              }
+            });
+            return prev.map((s) => (s.userId === peerId ? { ...s, stream: updatedStream } : s));
           }
           // If stream doesn't exist yet, check if we have participant info
           const participant = allParticipants.get(peerId);
@@ -176,6 +195,10 @@ export const useWebRTC = (
           }
           return prev;
         });
+        
+        // Log for debugging
+        // eslint-disable-next-line no-console
+        console.log(`Received track from ${peerId}, stream has ${stream.getTracks().length} tracks`);
       };
 
       pc.onconnectionstatechange = () => {
