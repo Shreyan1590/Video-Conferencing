@@ -99,15 +99,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isLoggingInRef.current = true;
     
     try {
-      // Verify the session is actually valid by fetching from server FIRST
+      // Verify the session is actually valid by fetching from server
       // This ensures the cookie was set correctly before we set user state
-      // Retry a few times in case cookie isn't immediately available
+      // For cross-origin, cookies might need a moment to be available
       let verified = false;
       let attempts = 0;
-      const maxAttempts = 5; // Increased retries for cross-origin cookie delays
+      const maxAttempts = 3; // Reduced retries - if cookie isn't set, retrying won't help
       
       while (!verified && attempts < maxAttempts) {
         try {
+          // Small delay before first attempt to allow cookie to be set
+          if (attempts > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 300 * attempts));
+          }
+          
           const res = await apiClient.get<{ user: User }>('/auth/me');
           // Only set user if verification succeeds
           setUser(res.data.user);
@@ -116,28 +121,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const status = err?.response?.status;
           attempts++;
           
-          if (status === 401 && attempts >= maxAttempts) {
-            // If all retries fail with 401, cookie wasn't set properly
-            setUser(null);
-            throw new Error('Failed to verify session after login. Cookie may not have been set.');
+          if (status === 401) {
+            // 401 means cookie wasn't sent - this is a configuration issue
+            if (attempts >= maxAttempts) {
+              setUser(null);
+              throw new Error(
+                'Session verification failed. The authentication cookie may not be set correctly. ' +
+                'Please check: 1) CORS_ORIGIN matches your frontend URL exactly, 2) Both frontend and backend use HTTPS, ' +
+                '3) Browser allows third-party cookies (for cross-origin requests).'
+              );
+            }
+            // Retry once more with a delay
+            continue;
           }
           
-          // For non-401 errors or if we haven't exhausted retries, wait and retry
-          if (attempts < maxAttempts) {
-            // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms
-            await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempts - 1)));
-          } else {
-            // Last attempt failed
-            setUser(null);
-            throw new Error('Failed to verify session after login');
-          }
+          // For non-401 errors, fail immediately
+          setUser(null);
+          throw new Error('Failed to verify session after login');
         }
       }
       
-      // Fallback: if we somehow get here without verification, use the provided user
-      // This should not happen, but provides a safety net
-      if (!verified && newUser) {
-        setUser(newUser);
+      if (!verified) {
+        setUser(null);
+        throw new Error('Session verification failed after multiple attempts');
       }
     } finally {
       // Clear flag after login completes

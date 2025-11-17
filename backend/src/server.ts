@@ -40,6 +40,18 @@ const start = async () => {
     res.json({ status: 'ok' });
   });
 
+  // Diagnostic endpoint to check CORS and cookie configuration
+  app.get('/api/auth/debug', (req, res) => {
+    res.json({
+      corsOrigin: ENV.CORS_ORIGIN,
+      nodeEnv: ENV.NODE_ENV,
+      isProduction: ENV.NODE_ENV === 'production',
+      requestOrigin: req.headers.origin,
+      cookiesReceived: Object.keys(req.cookies || {}),
+      cookiePresent: Boolean(req.cookies?.vc_token)
+    });
+  });
+
   app.use('/api/auth', authRoutes);
   app.use('/api/rooms', roomsRoutes);
 

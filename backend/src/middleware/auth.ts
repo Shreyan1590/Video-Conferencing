@@ -16,8 +16,16 @@ const COOKIE_NAME = 'vc_token';
 
 export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
   const token = req.cookies?.[COOKIE_NAME];
-
+  
+  // Log cookie presence for debugging
   if (!token) {
+    // eslint-disable-next-line no-console
+    console.log('Auth middleware: No cookie found', {
+      cookieName: COOKIE_NAME,
+      allCookies: Object.keys(req.cookies || {}),
+      origin: req.headers.origin,
+      referer: req.headers.referer
+    });
     return res.status(401).json({ message: 'Auth cookie missing' });
   }
 
@@ -57,12 +65,31 @@ export const setAuthCookie = (res: Response, token: string) => {
   const isProduction = ENV.NODE_ENV === 'production';
   const isCrossOrigin = Boolean(ENV.CORS_ORIGIN && ENV.CORS_ORIGIN !== 'http://localhost:5173');
   
-  res.cookie(COOKIE_NAME, token, {
+  const cookieOptions: {
+    httpOnly: boolean;
+    sameSite: 'none' | 'lax' | 'strict';
+    secure: boolean;
+    maxAge: number;
+    path: string;
+    domain?: never; // Explicitly don't set domain for cross-origin cookies
+  } = {
     httpOnly: true,
     sameSite: isCrossOrigin ? 'none' : 'lax', // 'none' required for cross-origin
     secure: isProduction || isCrossOrigin, // Must be true when sameSite is 'none'
     maxAge: 8 * 60 * 60 * 1000, // 8 hours
     path: '/' // Ensure cookie is available for all paths
+    // Explicitly NOT setting domain - browser will handle it for cross-origin
+  };
+  
+  // eslint-disable-next-line no-console
+  console.log('Setting auth cookie:', {
+    name: COOKIE_NAME,
+    sameSite: cookieOptions.sameSite,
+    secure: cookieOptions.secure,
+    isCrossOrigin,
+    corsOrigin: ENV.CORS_ORIGIN
   });
+  
+  res.cookie(COOKIE_NAME, token, cookieOptions);
 };
 

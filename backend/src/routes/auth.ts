@@ -140,6 +140,9 @@ router.post('/register', async (req, res) => {
     const token = jwt.sign({ id, email, username, fullName }, ENV.JWT_SECRET, { expiresIn: '8h' });
 
     setAuthCookie(res, token);
+    
+    // eslint-disable-next-line no-console
+    console.log('Registration successful, cookie set for user:', email);
 
     // Keep the OTP record with verified=true for audit/reference instead of deleting it.
     return res.status(201).json({ user: { id, email, username, fullName } });
@@ -181,6 +184,9 @@ router.post('/login', async (req, res) => {
     );
 
     setAuthCookie(res, token);
+    
+    // eslint-disable-next-line no-console
+    console.log('Login successful, cookie set for user:', user.email);
 
     return res.json({
       user: { id, email: user.email, username: user.username, fullName: user.fullName }
