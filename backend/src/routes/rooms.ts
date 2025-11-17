@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import type { ModifyResult } from 'mongodb';
 
 import { getCollections } from '../db/mongo';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import type { ScheduledRoomDocument } from '../db/mongo';
 
 const router = Router();
 
@@ -219,11 +221,10 @@ router.put('/schedules/:code', authMiddleware, async (req: AuthRequest, res) => 
       { returnDocument: 'after' }
     );
 
-    if (!result || !result.value) {
+    const schedule = (result as ModifyResult<ScheduledRoomDocument>).value ?? null;
+    if (!schedule) {
       return res.status(404).json({ message: 'Schedule not found' });
     }
-
-    const schedule = result.value;
 
     return res.json({
       schedule: {
