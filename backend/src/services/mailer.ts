@@ -3,14 +3,16 @@ import nodemailer from 'nodemailer';
 import { ENV } from '../config/env';
 
 let transporter: nodemailer.Transporter | null = null;
+let isConfigured = false;
 
 const getTransporter = () => {
   if (transporter) return transporter;
 
   if (!ENV.MAIL_USER || !ENV.MAIL_PASS) {
+    const errorMsg = 'MAIL_USER or MAIL_PASS not set; OTP emails will not be sent.';
     // eslint-disable-next-line no-console
-    console.warn('MAIL_USER or MAIL_PASS not set; OTP emails will not be sent.');
-    throw new Error('Mail transport not configured');
+    console.error(errorMsg);
+    throw new Error(errorMsg);
   }
 
   transporter = nodemailer.createTransport({
@@ -23,14 +25,37 @@ const getTransporter = () => {
     }
   });
 
+  // Verify connection configuration
+  transporter.verify((error) => {
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error('SMTP connection verification failed:', error);
+      isConfigured = false;
+    } else {
+      // eslint-disable-next-line no-console
+      console.log('SMTP server is ready to send emails');
+      isConfigured = true;
+    }
+  });
+
   return transporter;
 };
 
 export const sendOtpEmail = async (to: string, otp: string) => {
   try {
+    // Check if mail is configured
+    if (!ENV.MAIL_USER || !ENV.MAIL_PASS) {
+      const errorMsg = 'Email service not configured. Please set MAIL_USER and MAIL_PASS environment variables.';
+      // eslint-disable-next-line no-console
+      console.error(errorMsg);
+      // eslint-disable-next-line no-console
+      console.log(`[FALLBACK] OTP for ${to}: ${otp}`);
+      throw new Error(errorMsg);
+    }
+
     const t = getTransporter();
 
-    await t.sendMail({
+    const info = await t.sendMail({
       from: `"Cliqtrix - ProVeloce" <${ENV.MAIL_USER}>`,
       to,
       subject: 'Your Cliqtrix - ProVeloce verification code',
@@ -43,12 +68,33 @@ export const sendOtpEmail = async (to: string, otp: string) => {
   <p style="font-size: 12px; color: #6b7280; margin-top: 16px;">If you didn&apos;t request this, you can safely ignore this email.</p>
 </div>`
     });
+
+    // eslint-disable-next-line no-console
+    console.log('Email sent successfully:', info.messageId);
+    return info;
   } catch (err) {
-    // Fallback: log the OTP but don't crash registration flow.
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    const errorDetails = err instanceof Error ? err.stack : String(err);
+    
     // eslint-disable-next-line no-console
-    console.error('Failed to send OTP email, falling back to console log:', err);
+    console.error('Failed to send OTP email:', {
+      to,
+      error: errorMessage,
+      details: errorDetails,
+      mailConfig: {
+        host: ENV.MAIL_HOST,
+        port: ENV.MAIL_PORT,
+        secure: ENV.MAIL_SECURE,
+        user: ENV.MAIL_USER ? `${ENV.MAIL_USER.substring(0, 3)}***` : 'NOT SET'
+      }
+    });
+    
+    // Fallback: log the OTP for development
     // eslint-disable-next-line no-console
-    console.log(`OTP for ${to}: ${otp}`);
+    console.log(`[FALLBACK] OTP for ${to}: ${otp}`);
+    
+    // Re-throw the error so the calling code knows it failed
+    throw err;
   }
 };
 

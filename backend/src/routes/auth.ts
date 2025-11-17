@@ -44,11 +44,23 @@ router.post('/send-otp', async (req, res) => {
       { upsert: true }
     );
 
-    await sendOtpEmail(email, otp);
-
-    return res.json({ message: 'OTP sent to your email if it exists.' });
-  } catch {
-    return res.status(500).json({ message: 'Failed to send OTP' });
+    try {
+      await sendOtpEmail(email, otp);
+      return res.json({ message: 'OTP sent to your email.' });
+    } catch (emailError) {
+      // eslint-disable-next-line no-console
+      console.error('Email sending failed:', emailError);
+      // Still return success to user (security: don't reveal if email exists)
+      // But log the error for debugging
+      return res.json({ 
+        message: 'OTP sent to your email if it exists.',
+        warning: 'Email service may not be configured. Check server logs for details.'
+      });
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('OTP generation failed:', error);
+    return res.status(500).json({ message: 'Failed to generate OTP' });
   }
 });
 
