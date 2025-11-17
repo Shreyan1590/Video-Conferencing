@@ -130,8 +130,8 @@ export const registerSignalingHandlers = (
         participant = { ...existingParticipant, socketId: socket.id };
         delete participant.leftAt;
       } else {
-        // New join: create participant record
-        participant = {
+        // New join: create participant record (without _id, MongoDB will generate it)
+        const newParticipant: Omit<MeetingParticipantDocument, '_id'> = {
           roomId,
           userId,
           fullName,
@@ -143,7 +143,8 @@ export const registerSignalingHandlers = (
           screenSharing: false,
           socketId: socket.id
         };
-        await meetingParticipants.insertOne(participant);
+        await meetingParticipants.insertOne(newParticipant);
+        participant = newParticipant as MeetingParticipantDocument;
       }
 
       // Load all existing participants (excluding those who left)
