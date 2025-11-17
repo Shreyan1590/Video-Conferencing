@@ -1,9 +1,15 @@
 {
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ]
+    "rewrites": [{
+            "source": "/(.*)",
+            "destination": "/index.html"
+        },
+        {
+            "source": "/api/:path*",
+            "destination": "https://video-conferencing-elj1.onrender.com/api/:path*"
+        },
+        {
+            "source": "/socket.io/:path*",
+            "destination": "https://video-conferencing-elj1.onrender.com/socket.io/:path*"
+        }
+    ]
 }
-
