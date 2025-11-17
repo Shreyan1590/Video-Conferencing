@@ -42,7 +42,7 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
 
 export const clearAuthCookie = (res: Response) => {
   const isProduction = ENV.NODE_ENV === 'production';
-  const isCrossOrigin = ENV.CORS_ORIGIN && ENV.CORS_ORIGIN !== 'http://localhost:5173';
+  const isCrossOrigin = Boolean(ENV.CORS_ORIGIN && ENV.CORS_ORIGIN !== 'http://localhost:5173');
   
   res.clearCookie(COOKIE_NAME, {
     httpOnly: true,
@@ -55,7 +55,7 @@ export const clearAuthCookie = (res: Response) => {
 export const setAuthCookie = (res: Response, token: string) => {
   // For cross-origin requests, we need sameSite: 'none' and secure: true
   const isProduction = ENV.NODE_ENV === 'production';
-  const isCrossOrigin = ENV.CORS_ORIGIN && ENV.CORS_ORIGIN !== 'http://localhost:5173';
+  const isCrossOrigin = Boolean(ENV.CORS_ORIGIN && ENV.CORS_ORIGIN !== 'http://localhost:5173');
   
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
