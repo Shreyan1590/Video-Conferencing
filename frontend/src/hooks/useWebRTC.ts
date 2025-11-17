@@ -299,28 +299,29 @@ export const useWebRTC = (
               signal: { sdp: offer }
             });
 
-          // Add to remote streams even without stream yet (will be updated when track arrives)
-          setRemoteStreams((prev) => {
-            const exists = prev.find((s) => s.userId === participant.userId);
-            if (!exists) {
-              return [
-                ...prev,
-                {
-                  userId: participant.userId,
-                  fullName: participant.fullName,
-                  stream: new MediaStream(),
-                  muted: participant.muted,
-                  videoEnabled: participant.videoEnabled,
-                  screenSharing: participant.screenSharing
-                }
-              ];
-            }
-            return prev;
-          });
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.error('Failed to create offer for participant:', participant.userId, err);
-          peersRef.current.delete(participant.userId);
+            // Add to remote streams even without stream yet (will be updated when track arrives)
+            setRemoteStreams((prev) => {
+              const exists = prev.find((s) => s.userId === participant.userId);
+              if (!exists) {
+                return [
+                  ...prev,
+                  {
+                    userId: participant.userId,
+                    fullName: participant.fullName,
+                    stream: new MediaStream(),
+                    muted: participant.muted,
+                    videoEnabled: participant.videoEnabled,
+                    screenSharing: participant.screenSharing
+                  }
+                ];
+              }
+              return prev;
+            });
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('Failed to create offer for participant:', participant.userId, err);
+            peersRef.current.delete(participant.userId);
+          }
         }
       }
       
