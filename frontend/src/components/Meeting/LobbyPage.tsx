@@ -31,19 +31,28 @@ export const LobbyPage: React.FC = () => {
   const MEETING_CODE_REGEX = /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{3}$/;
 
   useEffect(() => {
+    // Only load schedules if user is authenticated
+    if (!user) {
+      return;
+    }
+
     const load = async () => {
       try {
         setLoadingSchedules(true);
         const res = await api.get('/rooms/schedules');
         setSchedules(res.data.schedules as Schedule[]);
-      } catch {
-        // ignore for now
+      } catch (err: any) {
+        // 401 is expected if not authenticated - ignore it
+        if (err?.response?.status !== 401) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to load schedules:', err);
+        }
       } finally {
         setLoadingSchedules(false);
       }
     };
     void load();
-  }, [api]);
+  }, [api, user]);
 
   const handleCreateRoom = () => {
     navigate('/instant');

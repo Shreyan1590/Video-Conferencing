@@ -27,7 +27,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const res = await apiClient.get<{ user: User }>('/auth/me');
         setUser(res.data.user);
-      } catch {
+      } catch (err: any) {
+        // 401 is expected when not logged in - don't log it as an error
+        if (err?.response?.status !== 401) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to fetch user:', err);
+        }
         setUser(null);
       } finally {
         setLoading(false);
