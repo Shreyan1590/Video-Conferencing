@@ -11,7 +11,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4000';
+    // Normalize URL (remove trailing slashes)
+    const rawUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4000';
+    const socketUrl = rawUrl.replace(/\/+$/, ''); // Remove trailing slashes
     const s = io(socketUrl, {
       path: '/socket.io',
       transports: ['websocket'],
