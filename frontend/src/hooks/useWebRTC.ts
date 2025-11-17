@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useSocket } from '../context/SocketContext';
 
@@ -9,6 +9,18 @@ interface RemoteStreamInfo {
   muted?: boolean;
   videoEnabled?: boolean;
   screenSharing?: boolean;
+}
+
+interface ParticipantInfo {
+  userId: string;
+  fullName: string;
+  username?: string;
+  isHost: boolean;
+  muted: boolean;
+  videoEnabled: boolean;
+  screenSharing: boolean;
+  joinedAt: number;
+  stream?: MediaStream;
 }
 
 type PeerConnectionState = 'new' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'closed';
@@ -41,6 +53,7 @@ export const useWebRTC = (
   const { socket } = useSocket();
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<RemoteStreamInfo[]>([]);
+  const [allParticipants, setAllParticipants] = useState<Map<string, ParticipantInfo>>(new Map());
   const [muted, setMuted] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected'>(
@@ -130,12 +143,37 @@ export const useWebRTC = (
 
       pc.ontrack = (event) => {
         const [stream] = event.streams;
+        if (!stream || stream.getTracks().length === 0) return;
+        
+        // Update remote streams
         setRemoteStreams((prev) => {
           const existing = prev.find((s) => s.userId === peerId);
           if (existing) {
             return prev.map((s) => (s.userId === peerId ? { ...s, stream } : s));
           }
-          // If stream doesn't exist yet, we'll add it when we get participant info
+          // If stream doesn't exist yet, check if we have participant info
+          const participant = allParticipants.get(peerId);
+          return [
+            ...prev,
+            {
+              userId: peerId,
+              fullName: participant?.fullName ?? peerId,
+              stream,
+              muted: participant?.muted ?? false,
+              videoEnabled: participant?.videoEnabled ?? true,
+              screenSharing: participant?.screenSharing ?? false
+            }
+          ];
+        });
+        
+        // Also update participant info with stream
+        setAllParticipants((prev) => {
+          const participant = prev.get(peerId);
+          if (participant) {
+            const updated = new Map(prev);
+            updated.set(peerId, { ...participant, stream });
+            return updated;
+          }
           return prev;
         });
       };
@@ -172,6 +210,22 @@ export const useWebRTC = (
         joinedAt: number;
       }>;
     }) => {
+      // Store all participants in state (including self for completeness)
+      const participantsMap = new Map<string, ParticipantInfo>();
+      participants.forEach((p) => {
+        participantsMap.set(p.userId, {
+          userId: p.userId,
+          fullName: p.fullName,
+          username: p.username,
+          isHost: p.isHost,
+          muted: p.muted,
+          videoEnabled: p.videoEnabled,
+          screenSharing: p.screenSharing,
+          joinedAt: p.joinedAt
+        });
+      });
+      setAllParticipants(participantsMap);
+
       // Create peer connections for all existing participants (except self)
       // Since we're joining later, we become the initiator for all existing participants
       const otherParticipants = participants.filter((p) => p.userId !== userId);
@@ -206,6 +260,7 @@ export const useWebRTC = (
             signal: { sdp: offer }
           });
 
+          // Add to remote streams even without stream yet (will be updated when track arrives)
           setRemoteStreams((prev) => {
             const exists = prev.find((s) => s.userId === participant.userId);
             if (!exists) {
@@ -229,17 +284,38 @@ export const useWebRTC = (
           peersRef.current.delete(participant.userId);
         }
       }
+      
+      // Update connection status
+      setConnectionStatus('connected');
     };
 
     const handleUserJoined = async ({
       userId: remoteId,
-      fullName: remoteFullName
+      fullName: remoteFullName,
+      username: remoteUsername,
+      isHost: remoteIsHost
     }: {
       userId: string;
       fullName: string;
       username?: string;
       isHost: boolean;
     }) => {
+      // Add to participants list immediately
+      setAllParticipants((prev) => {
+        const updated = new Map(prev);
+        updated.set(remoteId, {
+          userId: remoteId,
+          fullName: remoteFullName,
+          username: remoteUsername,
+          isHost: remoteIsHost,
+          muted: false,
+          videoEnabled: true,
+          screenSharing: false,
+          joinedAt: Date.now()
+        });
+        return updated;
+      });
+
       const existing = peersRef.current.get(remoteId);
       if (existing && existing.pc.connectionState !== 'closed') return;
 
@@ -265,10 +341,21 @@ export const useWebRTC = (
 
         socket.emit('signal', { roomId, to: remoteId, from: userId, signal: { sdp: offer } });
 
+        // Add to remote streams even without stream yet
         setRemoteStreams((prev) => {
           const exists = prev.find((s) => s.userId === remoteId);
           if (!exists) {
-            return [...prev, { userId: remoteId, fullName: remoteFullName, stream: new MediaStream() }];
+            return [
+              ...prev,
+              {
+                userId: remoteId,
+                fullName: remoteFullName,
+                stream: new MediaStream(),
+                muted: false,
+                videoEnabled: true,
+                screenSharing: false
+              }
+            ];
           }
           return prev;
         });
@@ -384,6 +471,12 @@ export const useWebRTC = (
         peersRef.current.delete(remoteId);
       }
       setRemoteStreams((prev) => prev.filter((s) => s.userId !== remoteId));
+      // Remove from participants list
+      setAllParticipants((prev) => {
+        const updated = new Map(prev);
+        updated.delete(remoteId);
+        return updated;
+      });
     };
 
     const handleMeetingStart = ({ startTime }: { roomId: string; startTime: number }) => {
@@ -479,8 +572,23 @@ export const useWebRTC = (
       videoEnabled?: boolean;
       screenSharing?: boolean;
     }) => {
-      // Update remote participant status in UI if needed
-      // This is mainly for UI indicators, actual media streams are handled by WebRTC
+      // Update participant info
+      setAllParticipants((prev) => {
+        const participant = prev.get(remoteId);
+        if (participant) {
+          const updated = new Map(prev);
+          updated.set(remoteId, {
+            ...participant,
+            muted: remoteMuted ?? participant.muted,
+            videoEnabled: remoteVideoEnabled ?? participant.videoEnabled,
+            screenSharing: remoteScreenSharing ?? participant.screenSharing
+          });
+          return updated;
+        }
+        return prev;
+      });
+
+      // Update remote streams
       setRemoteStreams((prev) =>
         prev.map((s) => {
           if (s.userId === remoteId) {
@@ -539,6 +647,44 @@ export const useWebRTC = (
       });
     });
   }, [localStream]);
+
+  // Merge participant info with stream info for complete participant list
+  const participants = React.useMemo(() => {
+    const merged = new Map<string, ParticipantInfo>();
+    
+    // Start with all participants from database
+    allParticipants.forEach((participant, id) => {
+      merged.set(id, { ...participant });
+    });
+    
+    // Update with stream information
+    remoteStreams.forEach((streamInfo) => {
+      const existing = merged.get(streamInfo.userId);
+      if (existing) {
+        merged.set(streamInfo.userId, {
+          ...existing,
+          stream: streamInfo.stream,
+          muted: streamInfo.muted ?? existing.muted,
+          videoEnabled: streamInfo.videoEnabled ?? existing.videoEnabled,
+          screenSharing: streamInfo.screenSharing ?? existing.screenSharing
+        });
+      } else {
+        // Participant with stream but not in database list (shouldn't happen, but handle it)
+        merged.set(streamInfo.userId, {
+          userId: streamInfo.userId,
+          fullName: streamInfo.fullName,
+          isHost: false,
+          muted: streamInfo.muted ?? false,
+          videoEnabled: streamInfo.videoEnabled ?? true,
+          screenSharing: streamInfo.screenSharing ?? false,
+          joinedAt: Date.now(),
+          stream: streamInfo.stream
+        });
+      }
+    });
+    
+    return Array.from(merged.values()).filter((p) => p.userId !== userId);
+  }, [allParticipants, remoteStreams, userId]);
 
   const toggleMute = useCallback(() => {
     if (!localStream || !socket) return;
@@ -640,6 +786,7 @@ export const useWebRTC = (
   return {
     localStream,
     remoteStreams,
+    participants, // Complete participant list with all info
     muted,
     videoEnabled,
     connectionStatus,

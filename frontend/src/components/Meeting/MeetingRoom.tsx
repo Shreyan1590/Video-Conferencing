@@ -235,6 +235,7 @@ const MeetingRoomInner: React.FC<MeetingRoomInnerProps> = ({
   const {
     localStream,
     remoteStreams,
+    participants,
     muted,
     videoEnabled,
     screenSharing,
@@ -438,9 +439,9 @@ const MeetingRoomInner: React.FC<MeetingRoomInnerProps> = ({
           <ParticipantList
             localUserId={userId}
             localFullName={user?.fullName ?? userId}
-            remoteParticipants={remoteStreams.map((s) => ({
-              userId: s.userId,
-              fullName: s.fullName ?? s.userId
+            remoteParticipants={participants.map((p) => ({
+              userId: p.userId,
+              fullName: p.fullName
             }))}
             isHost={isHost}
             onAction={(targetUserId, action) => {
@@ -462,9 +463,9 @@ const MeetingRoomInner: React.FC<MeetingRoomInnerProps> = ({
             fullName={user?.fullName ?? userId}
             participants={[
               { userId, fullName: user?.fullName ?? userId },
-              ...remoteStreams.map((s) => ({
-                userId: s.userId,
-                fullName: s.fullName ?? s.userId
+              ...participants.map((p) => ({
+                userId: p.userId,
+                fullName: p.fullName
               }))
             ]}
           />

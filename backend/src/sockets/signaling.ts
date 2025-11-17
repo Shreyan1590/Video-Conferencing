@@ -203,12 +203,37 @@ export const registerSignalingHandlers = (
 
       // Notify others about the new user (only if it's a new join, not a rejoin)
       if (!existingParticipant) {
+        // Broadcast to all other participants in the room
         socket.to(roomId).emit('user-joined', {
           userId,
           fullName,
           username,
           isHost
         });
+        
+        // Also send updated participant list to all participants (including the new joiner)
+        // This ensures everyone has the complete list
+        const updatedParticipants = await meetingParticipants
+          .find({
+            roomId,
+            leftAt: { $exists: false }
+          })
+          .sort({ joinedAt: 1 })
+          .toArray();
+
+        io.to(roomId).emit('participants-list', {
+          participants: updatedParticipants.map((p) => ({
+            userId: p.userId,
+            fullName: p.fullName,
+            username: p.username,
+            isHost: p.isHost,
+            muted: p.muted,
+            videoEnabled: p.videoEnabled,
+            screenSharing: p.screenSharing,
+            joinedAt: p.joinedAt.getTime()
+          }))
+        });
+        
         io.to(roomId).emit('system-message', {
           message: `${fullName} joined the room`,
           timestamp: Date.now()
@@ -260,7 +285,31 @@ export const registerSignalingHandlers = (
         }
       }
 
+      // Broadcast user-left event
       socket.to(roomId).emit('user-left', { userId });
+      
+      // Send updated participant list to all remaining participants
+      const remainingParticipants = await meetingParticipants
+        .find({
+          roomId,
+          leftAt: { $exists: false }
+        })
+        .sort({ joinedAt: 1 })
+        .toArray();
+
+      io.to(roomId).emit('participants-list', {
+        participants: remainingParticipants.map((p) => ({
+          userId: p.userId,
+          fullName: p.fullName,
+          username: p.username,
+          isHost: p.isHost,
+          muted: p.muted,
+          videoEnabled: p.videoEnabled,
+          screenSharing: p.screenSharing,
+          joinedAt: p.joinedAt.getTime()
+        }))
+      });
+      
       io.to(roomId).emit('system-message', {
         message: `A participant left the room`,
         timestamp: Date.now()
